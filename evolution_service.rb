@@ -427,6 +427,7 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     body = {
       number: phone_number.delete('+'),
       mediatype: mediatype,
+      mimetype: attachment.file.content_type,
       media: media_url,
       fileName: attachment.file.filename.to_s
     }

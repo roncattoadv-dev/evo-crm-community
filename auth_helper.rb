@@ -87,8 +87,9 @@ module AuthHelper
       value: refresh_token,
       httponly: true,
       secure: is_secure,
-      samesite: is_secure ? :none : :lax, # :none requer secure: true para funcionar
-      path: '/api/v1/auth', # Path mais amplo para incluir refresh e outros endpoints
+      same_site: is_secure ? :none : :lax,
+      expires: 30.days.from_now,
+      path: '/api/v1/auth',
     }
     
     # Só adiciona domain se não for nil
@@ -106,7 +107,8 @@ module AuthHelper
       value: access_token,
       httponly: true,
       secure: is_secure,
-      samesite: is_secure ? :none : :lax, # :none requer secure: true para funcionar
+      same_site: is_secure ? :none : :lax,
+      expires: 1.day.from_now,
       domain: cookie_domain
     }
   end

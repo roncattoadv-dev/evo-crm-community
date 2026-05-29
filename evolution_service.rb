@@ -378,7 +378,8 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
       headers: api_headers,
       body: {
         number: phone_number.delete('+'),
-        text: html_to_whatsapp(raw_content)
+        text: html_to_whatsapp(raw_content),
+        linkPreview: true
       }.to_json
     )
 

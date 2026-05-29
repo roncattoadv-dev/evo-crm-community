@@ -1,0 +1,23 @@
+test:
+  service: Disk
+  root: <%= Rails.root.join("tmp/storage") %>
+
+local:
+  service: Disk
+  root: /app/storage
+
+amazon:
+  service: S3
+  access_key_id: <%= ENV.fetch('AWS_ACCESS_KEY_ID', '') %>
+  secret_access_key: <%= ENV.fetch('AWS_SECRET_ACCESS_KEY', '') %>
+  region: <%= ENV.fetch('AWS_REGION', '') %>
+  bucket: <%= ENV.fetch('S3_BUCKET_NAME', '') %>
+
+s3_compatible:
+  service: S3
+  access_key_id: <%= GlobalConfigService.load('STORAGE_ACCESS_KEY_ID', ENV.fetch('STORAGE_ACCESS_KEY_ID', '')) rescue ENV.fetch('STORAGE_ACCESS_KEY_ID', '') %>
+  secret_access_key: <%= GlobalConfigService.load('STORAGE_ACCESS_SECRET', ENV.fetch('STORAGE_SECRET_ACCESS_KEY', '')) rescue ENV.fetch('STORAGE_SECRET_ACCESS_KEY', '') %>
+  region: <%= GlobalConfigService.load('STORAGE_REGION', ENV.fetch('STORAGE_REGION', 'auto')) rescue ENV.fetch('STORAGE_REGION', 'auto') %>
+  bucket: <%= GlobalConfigService.load('STORAGE_BUCKET_NAME', ENV.fetch('STORAGE_BUCKET_NAME', '')) rescue ENV.fetch('STORAGE_BUCKET_NAME', '') %>
+  endpoint: <%= GlobalConfigService.load('STORAGE_ENDPOINT', ENV.fetch('STORAGE_ENDPOINT', '')) rescue ENV.fetch('STORAGE_ENDPOINT', '') %>
+  force_path_style: true

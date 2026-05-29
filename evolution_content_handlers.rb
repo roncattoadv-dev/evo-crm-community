@@ -48,12 +48,35 @@ module Whatsapp::EvolutionHandlers::ContentHandlers
 
     # Persist CTWA (Click-to-WhatsApp) tracking fields from Evolution API contextInfo so they
     # are available in webhook_data and forwarded to downstream integrations such as n8n.
-    context_info = @raw_message[:contextInfo]
+    # contextInfo can be at the root OR nested inside the message type object.
+    context_info = find_ctwa_context_info
     if context_info.present?
       content_attributes[:ctwa_clid] = context_info[:ctwaClid] if context_info[:ctwaClid].present?
       content_attributes[:ad_source_id] = context_info[:sourceId] if context_info[:sourceId].present?
     end
 
     content_attributes
+  end
+
+  def find_ctwa_context_info
+    # 1. Root level (some Evolution API versions)
+    ctx = @raw_message[:contextInfo]
+    return ctx if ctx.is_a?(Hash) && ctx.present?
+
+    msg = @raw_message[:message]
+    return nil unless msg.is_a?(Hash)
+
+    # 2. Directly under the message object
+    ctx = msg[:contextInfo]
+    return ctx if ctx.is_a?(Hash) && ctx.present?
+
+    # 3. Inside each known message type (most common for CTWA ads)
+    %i[extendedTextMessage imageMessage videoMessage audioMessage
+       documentMessage stickerMessage buttonMessage templateMessage].each do |type|
+      ctx = msg.dig(type, :contextInfo)
+      return ctx if ctx.is_a?(Hash) && ctx.present?
+    end
+
+    nil
   end
 end

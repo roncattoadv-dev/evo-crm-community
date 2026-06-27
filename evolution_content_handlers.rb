@@ -59,21 +59,28 @@ module Whatsapp::EvolutionHandlers::ContentHandlers
   end
 
   def find_ctwa_context_info
-    # 1. Root level (some Evolution API versions)
-    ctx = @raw_message[:contextInfo]
+    # Hashes nested inside Sidekiq jobs may use string keys instead of symbols.
+    # Check both forms for every lookup.
+
+    # 1. Root level — Evolution API places contextInfo here for messageType=conversation
+    ctx = @raw_message[:contextInfo] || @raw_message['contextInfo']
     return ctx if ctx.is_a?(Hash) && ctx.present?
 
-    msg = @raw_message[:message]
+    msg = @raw_message[:message] || @raw_message['message']
     return nil unless msg.is_a?(Hash)
 
     # 2. Directly under the message object
-    ctx = msg[:contextInfo]
+    ctx = msg[:contextInfo] || msg['contextInfo']
     return ctx if ctx.is_a?(Hash) && ctx.present?
 
-    # 3. Inside each known message type (most common for CTWA ads)
-    %i[extendedTextMessage imageMessage videoMessage audioMessage
-       documentMessage stickerMessage buttonMessage templateMessage].each do |type|
-      ctx = msg.dig(type, :contextInfo)
+    # 3. Inside each known message type (symbol and string keys)
+    %w[extendedTextMessage imageMessage videoMessage audioMessage
+       documentMessage stickerMessage buttonMessage templateMessage
+       conversation ephemeralMessage viewOnceMessage].each do |type|
+      ctx = msg.dig(type.to_sym, :contextInfo) ||
+            msg.dig(type.to_sym, 'contextInfo') ||
+            msg.dig(type, :contextInfo) ||
+            msg.dig(type, 'contextInfo')
       return ctx if ctx.is_a?(Hash) && ctx.present?
     end
 

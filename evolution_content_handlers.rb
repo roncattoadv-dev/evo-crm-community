@@ -74,13 +74,14 @@ module Whatsapp::EvolutionHandlers::ContentHandlers
     return ctx if ctx.is_a?(Hash) && ctx.present?
 
     # 3. Inside each known message type (symbol and string keys)
+    # msg[type] may be a String (e.g. conversation: "Carlos") — guard before digging deeper.
     %w[extendedTextMessage imageMessage videoMessage audioMessage
        documentMessage stickerMessage buttonMessage templateMessage
        conversation ephemeralMessage viewOnceMessage].each do |type|
-      ctx = msg.dig(type.to_sym, :contextInfo) ||
-            msg.dig(type.to_sym, 'contextInfo') ||
-            msg.dig(type, :contextInfo) ||
-            msg.dig(type, 'contextInfo')
+      type_msg = msg[type.to_sym] || msg[type]
+      next unless type_msg.is_a?(Hash)
+
+      ctx = type_msg[:contextInfo] || type_msg['contextInfo']
       return ctx if ctx.is_a?(Hash) && ctx.present?
     end
 

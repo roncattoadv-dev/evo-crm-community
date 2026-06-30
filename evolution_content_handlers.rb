@@ -48,11 +48,19 @@ module Whatsapp::EvolutionHandlers::ContentHandlers
 
     # Persist CTWA (Click-to-WhatsApp) tracking fields from Evolution API contextInfo so they
     # are available in webhook_data and forwarded to downstream integrations such as n8n.
-    # contextInfo can be at the root OR nested inside the message type object.
+    # ctwaClid lives in contextInfo.externalAdReply (not directly in contextInfo).
     context_info = find_ctwa_context_info
     if context_info.present?
-      content_attributes[:ctwa_clid] = context_info[:ctwaClid] if context_info[:ctwaClid].present?
-      content_attributes[:ad_source_id] = context_info[:sourceId] if context_info[:sourceId].present?
+      ext = context_info[:externalAdReply] || context_info['externalAdReply']
+      if ext.is_a?(Hash)
+        ctwa = ext[:ctwaClid] || ext['ctwaClid']
+        src  = ext[:sourceId]  || ext['sourceId']
+        content_attributes[:ctwa_clid]    = ctwa if ctwa.present?
+        content_attributes[:ad_source_id] = src  if src.present?
+      end
+      # Fallback: some older Evolution API versions place ctwaClid directly in contextInfo.
+      content_attributes[:ctwa_clid]    ||= context_info[:ctwaClid] || context_info['ctwaClid']
+      content_attributes[:ad_source_id] ||= context_info[:sourceId] || context_info['sourceId']
     end
 
     content_attributes
@@ -75,9 +83,10 @@ module Whatsapp::EvolutionHandlers::ContentHandlers
 
     # 3. Inside each known message type (symbol and string keys)
     # msg[type] may be a String (e.g. conversation: "Carlos") — guard before digging deeper.
+    # interactiveMessage is the main CTWA ad format from Meta (contextInfo lives inside it).
     %w[extendedTextMessage imageMessage videoMessage audioMessage
        documentMessage stickerMessage buttonMessage templateMessage
-       conversation ephemeralMessage viewOnceMessage].each do |type|
+       conversation ephemeralMessage viewOnceMessage interactiveMessage].each do |type|
       type_msg = msg[type.to_sym] || msg[type]
       next unless type_msg.is_a?(Hash)
 

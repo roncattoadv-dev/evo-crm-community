@@ -27,7 +27,7 @@ module Whatsapp::EvolutionHandlers::Helpers
     msg = @raw_message[:message]
     return 'text' unless msg
 
-    if msg[:conversation] || msg.dig(:extendedTextMessage, :text).present?
+    if msg[:conversation] || msg.dig(:extendedTextMessage, :text).present? || msg.dig(:interactiveMessage, :body, :text).present?
       'text'
     elsif msg[:imageMessage]
       'image'
@@ -55,7 +55,9 @@ module Whatsapp::EvolutionHandlers::Helpers
   def message_content
     case message_type
     when 'text'
-      @raw_message.dig(:message, :conversation) || @raw_message.dig(:message, :extendedTextMessage, :text)
+      @raw_message.dig(:message, :conversation) ||
+        @raw_message.dig(:message, :extendedTextMessage, :text) ||
+        @raw_message.dig(:message, :interactiveMessage, :body, :text)
     when 'image'
       @raw_message.dig(:message, :imageMessage, :caption)
     when 'video'

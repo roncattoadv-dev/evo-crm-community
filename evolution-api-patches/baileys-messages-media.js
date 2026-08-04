@@ -297,8 +297,12 @@ export async function generateThumbnail(file, mediaType, options) {
                 exec(cmd, (err) => { if (err) reject(err); else resolve(); });
             });
             const outFile = outPrefix + '.jpg';
-            const buff = await fs.readFile(outFile);
-            thumbnail = buff.toString('base64');
+            const pageBuffer = await fs.readFile(outFile);
+            const lib = await getImageProcessingLibrary();
+            const thumbBuffer = 'sharp' in lib && typeof lib.sharp?.default === 'function'
+                ? await lib.sharp.default(pageBuffer).resize(100).jpeg({ quality: 50 }).toBuffer()
+                : pageBuffer;
+            thumbnail = thumbBuffer.toString('base64');
             await fs.unlink(outFile);
         }
         catch (err) {

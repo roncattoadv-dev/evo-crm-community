@@ -11,6 +11,16 @@ module AuthHelper
     scopes: 'read write'
   }.freeze
 
+  # Added 2026-07-07: a newer vendor image release added a call to this method in
+  # auth_controller.rb#login, but this file (our custom AuthHelper patch, bind-mounted
+  # over the vendor's own concern) predates that feature and never defined it, causing
+  # every login to 500 with NoMethodError. Opt-in via REQUIRE_EMAIL_CONFIRMATION env var,
+  # default OFF to match the existing docker-compose (var isn't set) and avoid locking
+  # out any existing unconfirmed users.
+  def require_email_confirmation?
+    ActiveModel::Type::Boolean.new.cast(ENV['REQUIRE_EMAIL_CONFIRMATION']) || false
+  end
+
   def send_auth_headers(user)
     invalidate_user_tokens(user)
     

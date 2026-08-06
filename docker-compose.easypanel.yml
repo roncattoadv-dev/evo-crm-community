@@ -187,7 +187,7 @@ services:
 
   evocrm_crm:
     image: evoapicloud/evo-ai-crm-community:latest
-    command: sh -c "until wget -qO- http://evocrm_auth:3001/health >/dev/null 2>&1; do echo 'Waiting for auth...'; sleep 5; done; bundle exec rails db:migrate 2>&1 || echo 'Migration had errors, continuing...'; bundle exec rails s -p 3000 -b 0.0.0.0"
+    command: sh -c "until wget -qO- http://evocrm_auth:3001/health >/dev/null 2>&1; do echo 'Waiting for auth...'; sleep 5; done; bundle exec rails db:migrate 2>&1 || echo 'Migration had errors, continuing...'; bundle exec rails runner /app/boot_checks/ensure_messages_status_integer.rb 2>&1 || echo 'Boot check failed, continuing...'; bundle exec rails s -p 3000 -b 0.0.0.0"
     <<: *network
     environment:
       <<: [*env-secrets, *env-postgres, *env-redis, *env-cors, *env-urls, *env-bot]
@@ -196,6 +196,7 @@ services:
       RAILS_LOG_TO_STDOUT:      "true"
       EVO_AUTH_SERVICE_URL:     http://evocrm_auth:3001
       EVO_AI_CORE_SERVICE_URL:  http://evocrm_core:5555
+      EVO_AI_PROCESSOR_URL:     http://evocrm_processor:8000
       DISABLE_TELEMETRY:        "true"
       LOG_LEVEL:                info
       ENABLE_ACCOUNT_SIGNUP:    "true"
@@ -212,6 +213,12 @@ services:
       - /opt/evocrm-patches/agent_bot_listener.rb:/app/app/listeners/agent_bot_listener.rb:ro
       - /opt/evocrm-patches/delegation_service.rb:/app/app/services/bot_runtime/delegation_service.rb:ro
       - /opt/evocrm-patches/20260626000001_fix_messages_status_integer.rb:/app/db/migrate/20260626000001_fix_messages_status_integer.rb:ro
+      - /opt/evocrm-patches/contact_inbox_builder.rb:/app/app/builders/contact_inbox_builder.rb:ro
+      - /opt/evocrm-patches/contact_inbox_with_contact_builder.rb:/app/app/builders/contact_inbox_with_contact_builder.rb:ro
+      - /opt/evocrm-patches/messages_upsert.rb:/app/app/services/whatsapp/evolution_handlers/messages_upsert.rb:ro
+      - /opt/evocrm-patches/incoming_message_evolution_service.rb:/app/app/services/whatsapp/incoming_message_evolution_service.rb:ro
+      - /opt/evocrm-patches/pipeline_items_controller.rb:/app/app/controllers/api/v1/pipeline_items_controller.rb:ro
+      - /opt/evocrm-patches/ensure_messages_status_integer.rb:/app/boot_checks/ensure_messages_status_integer.rb:ro
     deploy:
       <<: *deploy-default
 
@@ -226,6 +233,7 @@ services:
       RAILS_ENV:               production
       EVO_AUTH_SERVICE_URL:    http://evocrm_auth:3001
       EVO_AI_CORE_SERVICE_URL: http://evocrm_core:5555
+      EVO_AI_PROCESSOR_URL:    http://evocrm_processor:8000
     volumes:
       - evocrm_storage:/app/storage
       - /opt/evocrm-patches/evolution_helpers.rb:/app/app/services/whatsapp/evolution_handlers/helpers.rb:ro
@@ -235,6 +243,10 @@ services:
       - /opt/evocrm-patches/n8n_request_service.rb:/app/app/services/agent_bots/n8n_request_service.rb:ro
       - /opt/evocrm-patches/agent_bot_listener.rb:/app/app/listeners/agent_bot_listener.rb:ro
       - /opt/evocrm-patches/delegation_service.rb:/app/app/services/bot_runtime/delegation_service.rb:ro
+      - /opt/evocrm-patches/contact_inbox_builder.rb:/app/app/builders/contact_inbox_builder.rb:ro
+      - /opt/evocrm-patches/contact_inbox_with_contact_builder.rb:/app/app/builders/contact_inbox_with_contact_builder.rb:ro
+      - /opt/evocrm-patches/messages_upsert.rb:/app/app/services/whatsapp/evolution_handlers/messages_upsert.rb:ro
+      - /opt/evocrm-patches/incoming_message_evolution_service.rb:/app/app/services/whatsapp/incoming_message_evolution_service.rb:ro
     deploy:
       <<: *deploy-default
 
@@ -275,6 +287,8 @@ services:
       - /opt/evocrm-patches/src/services/adk/runners/standard_runner.py:/app/src/services/adk/runners/standard_runner.py:ro
       - /opt/evocrm-patches/src/services/providers/n8n_service.py:/app/src/services/providers/n8n_service.py:ro
       - /opt/evocrm-patches/src/api/a2a_routes.py:/app/src/api/a2a_routes.py:ro
+      - /opt/evocrm-patches/src/api/session_routes.py:/app/src/api/session_routes.py:ro
+      - /opt/evocrm-patches/src/middleware/evo_auth.py:/app/src/middleware/evo_auth.py:ro
     <<: *network
     environment:
       <<: [*env-secrets, *env-encryption]

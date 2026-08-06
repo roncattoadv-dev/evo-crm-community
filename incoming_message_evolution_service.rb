@@ -15,6 +15,8 @@ class Whatsapp::IncomingMessageEvolutionService < Whatsapp::IncomingMessageBaseS
       process_messages_upsert
     when 'messages.update'
       process_messages_update
+    when 'messages.delete'
+      process_messages_delete
     when 'contacts.update'
       process_contacts_update
     when 'chats.update', 'chats.upsert'
@@ -108,12 +110,11 @@ class Whatsapp::IncomingMessageEvolutionService < Whatsapp::IncomingMessageBaseS
   def handle_connection_open(profile_picture_url)
     Rails.logger.info "Evolution API: Connection opened successfully for instance #{processed_params[:instance]}"
 
-    # Clear any reauthorization flags from previous disconnections
+    # Reconnected: realign both connection views to 'open'. Previously this only
+    # cleared the reauthorization flag, leaving provider_connection stuck on the
+    # last 'close'/'logged_out' — which kept the composer/banner disconnected.
     channel = inbox.channel
-    if channel.reauthorization_required?
-      Rails.logger.info "Evolution API: Clearing reauthorization flag for channel #{channel.id}"
-      channel.reauthorized!
-    end
+    channel.mark_connected!
 
     # Update inbox avatar if profile picture URL is present
     return unless profile_picture_url.present?
@@ -128,22 +129,27 @@ class Whatsapp::IncomingMessageEvolutionService < Whatsapp::IncomingMessageBaseS
     end
   end
 
+  # statusReasons que indicam perda PERMANENTE de autorizacao (exigem reautorizar).
+  # Os demais (ex.: 408/428/440/503/515) sao desconexoes TRANSITORIAS/de rede: a
+  # Evolution reconecta sozinha e reemite connection.update=open. Marcar esses como
+  # "reauthorization required" deixava o canal preso e descartava mensagens (EVO-1967).
+  PERMANENT_DISCONNECT_REASONS = [401, 403, 411, 500].freeze
+
   def handle_connection_close(status_reason)
     Rails.logger.warn "Evolution API: Connection closed for instance #{processed_params[:instance]} - statusReason: #{status_reason}"
 
     channel = inbox.channel
 
-    # Mark channel as requiring reauthorization
-    if status_reason == 401 || status_reason == '401'
-      Rails.logger.error "Evolution API: Unauthorized (401) - marking channel #{channel.id} for reauthorization"
+    if PERMANENT_DISCONNECT_REASONS.include?(status_reason.to_i)
+      Rails.logger.error "Evolution API: Permanent disconnect (reason: #{status_reason}) - marking channel #{channel.id} for reauthorization"
       channel.prompt_reauthorization!
+      channel.update_provider_connection!({ 'connection' => 'disconnected', 'error' => "Connection closed (statusReason: #{status_reason})" })
     else
-      Rails.logger.warn "Evolution API: Connection closed (reason: #{status_reason}) - marking channel #{channel.id} for reauthorization"
-      channel.prompt_reauthorization!
+      # Transitorio: NAO exigir reautorizacao. Reflete o estado (reusa 'close', ja existente)
+      # e deixa a Evolution reconectar (handle_connection_open limpa qualquer flag).
+      Rails.logger.warn "Evolution API: Transient disconnect (reason: #{status_reason}) - channel #{channel.id} kept active, awaiting reconnect"
+      channel.update_provider_connection!({ 'connection' => 'close', 'error' => "Connection closed (statusReason: #{status_reason})" })
     end
-
-    # Update provider_connection status
-    channel.update_provider_connection!({ 'connection' => 'disconnected', 'error' => "Connection closed (statusReason: #{status_reason})" })
   rescue StandardError => e
     Rails.logger.error "Evolution API: Failed to handle connection close: #{e.message}"
   end

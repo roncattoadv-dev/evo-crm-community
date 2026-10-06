@@ -221,6 +221,8 @@ services:
       - /opt/evocrm-patches/whatsapp_sync_listener.rb:/app/app/listeners/whatsapp_sync_listener.rb:ro
       - /opt/evocrm-patches/whatsapp_cloud_service.rb:/app/app/services/whatsapp/providers/whatsapp_cloud_service.rb:ro
       - /opt/evocrm-patches/send_on_whatsapp_service.rb:/app/app/services/whatsapp/send_on_whatsapp_service.rb:ro
+      - /opt/evocrm-patches/scheduled_actions_executor_service.rb:/app/app/services/scheduled_actions/executor_service.rb:ro
+      - /opt/evocrm-patches/scheduled_action_message_failure.rb:/app/config/initializers/zz_scheduled_action_message_failure.rb:ro
       - /opt/evocrm-patches/pipeline_items_controller.rb:/app/app/controllers/api/v1/pipeline_items_controller.rb:ro
       - /opt/evocrm-patches/ensure_messages_status_integer.rb:/app/boot_checks/ensure_messages_status_integer.rb:ro
     # App Secret do app Meta do webhook Cloud (X-Hub-Signature-256). Docker secret
@@ -259,6 +261,8 @@ services:
       - /opt/evocrm-patches/whatsapp_sync_listener.rb:/app/app/listeners/whatsapp_sync_listener.rb:ro
       - /opt/evocrm-patches/whatsapp_cloud_service.rb:/app/app/services/whatsapp/providers/whatsapp_cloud_service.rb:ro
       - /opt/evocrm-patches/send_on_whatsapp_service.rb:/app/app/services/whatsapp/send_on_whatsapp_service.rb:ro
+      - /opt/evocrm-patches/scheduled_actions_executor_service.rb:/app/app/services/scheduled_actions/executor_service.rb:ro
+      - /opt/evocrm-patches/scheduled_action_message_failure.rb:/app/config/initializers/zz_scheduled_action_message_failure.rb:ro
     deploy:
       <<: *deploy-default
 

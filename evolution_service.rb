@@ -443,7 +443,16 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     process_response(response)
   end
 
+  # Evolution API re-encodes every audio at a fixed 128k/48kHz, producing voice
+  # notes ~9x heavier than the ones WhatsApp itself records (~16-24k, 16kHz).
+  # Some recipient phones show those but cannot play them. So we transcode here
+  # to a native-like voice-note profile and tell Evolution not to re-encode.
+  VOICE_NOTE_FFMPEG_TIMEOUT_SECONDS = 45
+
   def send_audio_message(phone_number, attachment)
+    result = send_audio_as_native_voice_note(phone_number, attachment)
+    return result if result
+
     # Try direct public URL first (for public S3 buckets)
     result = send_audio_with_direct_url(phone_number, attachment)
 
@@ -454,6 +463,65 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     end
 
     result
+  end
+
+  def send_audio_as_native_voice_note(phone_number, attachment)
+    return false unless attachment.file.attached?
+
+    ogg = transcode_to_voice_note(attachment)
+    return false if ogg.blank?
+
+    Rails.logger.info "[Evolution Audio] Sending native voice note (#{ogg.bytesize} bytes, encoding: false)"
+
+    response = HTTParty.post(
+      "#{api_base_path}/message/sendWhatsAppAudio/#{instance_name}",
+      headers: api_headers,
+      body: { number: phone_number.delete('+'), audio: Base64.strict_encode64(ogg), encoding: false }.to_json,
+      timeout: 60
+    )
+
+    Rails.logger.info "[Evolution Audio] Voice note response status: #{response.code}"
+    process_response(response)
+  rescue StandardError => e
+    Rails.logger.error "[Evolution Audio] Native voice note failed, falling back: #{e.class} - #{e.message}"
+    false
+  end
+
+  # Returns the OGG/Opus bytes (mono, 16kHz, 24k VBR, voip) or nil on any failure.
+  def transcode_to_voice_note(attachment)
+    require 'open3'
+    require 'tempfile'
+    require 'timeout'
+
+    input = Tempfile.new(['evo_audio_in', File.extname(attachment.file.filename.to_s)])
+    input.binmode
+    attachment.file.blob.download { |chunk| input.write(chunk) }
+    input.close
+    output_path = "#{input.path}.out.ogg"
+
+    cmd = [
+      'ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+      '-i', input.path, '-vn', '-map_metadata', '-1',
+      '-c:a', 'libopus', '-b:a', '24k', '-vbr', 'on', '-ac', '1', '-ar', '16000',
+      '-application', 'voip', '-avoid_negative_ts', 'make_zero', '-f', 'ogg', output_path
+    ]
+    out, status = Open3.popen2e(*cmd) do |stdin, stdout_err, wait_thr|
+      stdin.close
+      begin
+        Timeout.timeout(VOICE_NOTE_FFMPEG_TIMEOUT_SECONDS) { [stdout_err.read, wait_thr.value] }
+      rescue Timeout::Error
+        Process.kill('KILL', wait_thr.pid) rescue nil # rubocop:disable Style/RescueModifier
+        ["timeout after #{VOICE_NOTE_FFMPEG_TIMEOUT_SECONDS}s", nil]
+      end
+    end
+
+    return File.binread(output_path) if status&.success? && File.size?(output_path)
+
+    Rails.logger.error "[Evolution Audio] ffmpeg failed (exit=#{status&.exitstatus}): #{out.to_s.truncate(500)}"
+    nil
+  ensure
+    input&.unlink
+    File.delete(output_path) if output_path && File.exist?(output_path)
   end
 
   def send_audio_with_direct_url(phone_number, attachment)

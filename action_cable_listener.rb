@@ -90,7 +90,19 @@ class ActionCableListener < BaseListener
     conversation, account = extract_conversation_and_account(event)
     tokens = (user_tokens(account, conversation.inbox.members) + contact_inbox_tokens(conversation.contact_inbox) + [account_token(account)]).compact
 
-    broadcast(account, tokens, CONVERSATION_UPDATED, conversation.push_event_data)
+    broadcast(account, tokens, CONVERSATION_UPDATED, conversation_live_payload(conversation))
+  end
+
+  # Mudança de estágio / entrada / saída de um card no pipeline. O vendor só
+  # despacha esses eventos para automações e webhooks; o chat nunca era avisado,
+  # então o selo "Pipeline • Estágio" da lista de conversas só mudava com F5.
+  # Reaproveita conversation.updated, que o frontend já sabe aplicar.
+  def pipeline_stage_updated(event)
+    broadcast_pipeline_change(event)
+  end
+
+  def pipeline_item_cancelled(event)
+    broadcast_pipeline_change(event)
   end
 
   def conversation_typing_on(event)
@@ -174,6 +186,54 @@ class ActionCableListener < BaseListener
   end
 
   private
+
+  # push_event_data só leva `labels` como lista de nomes. O frontend descarta
+  # etiquetas sem cor (mantém as antigas), então a etiqueta nova só aparecia ao
+  # recarregar. `labels_data` (id/título/cor) e `pipelines` seguem o mesmo
+  # formato do ConversationSerializer usado no GET /conversations.
+  def conversation_live_payload(conversation)
+    conversation.push_event_data.merge(
+      labels_data: live_labels_data(conversation),
+      pipelines: live_pipelines_data(conversation)
+    )
+  end
+
+  def live_labels_data(conversation)
+    names = conversation.label_list.map { |name| name.to_s.strip }.reject(&:blank?)
+    return [] if names.empty?
+
+    by_title = Label.where('LOWER(title) IN (?)', names.map(&:downcase)).index_by { |label| label.title.to_s.downcase }
+    names.filter_map do |name|
+      label = by_title[name.downcase]
+      next unless label
+
+      { id: label.id, title: label.title, color: label.color.presence || '#1f93ff' }
+    end
+  end
+
+  def live_pipelines_data(conversation)
+    items = PipelineItem.where(conversation_id: conversation.id).includes(:pipeline, :pipeline_stage).to_a
+    items.select { |item| item.pipeline && item.pipeline_stage }.group_by(&:pipeline).map do |pipeline, pipeline_items|
+      stages = pipeline_items.sort_by { |item| item.pipeline_stage.position.to_i }.map do |item|
+        stage = item.pipeline_stage
+        { id: stage.id, name: stage.name, color: stage.color, days_in_current_stage: item.days_in_current_stage }
+      end
+      { id: pipeline.id, name: pipeline.name, stages: stages }
+    end
+  end
+
+  # Roda no SyncDispatcher, dentro da transação que move o card: nunca pode
+  # levantar exceção, senão derruba a própria movimentação.
+  def broadcast_pipeline_change(event)
+    conversation = event.data[:pipeline_item]&.conversation
+    return if conversation.nil?
+
+    account = single_tenant_account
+    tokens = (user_tokens(account, nil) + [account_token(account)]).compact
+    broadcast(account, tokens, CONVERSATION_UPDATED, conversation_live_payload(conversation))
+  rescue StandardError => e
+    Rails.logger.error "ActionCableListener pipeline broadcast failed: #{e.class}: #{e.message}"
+  end
 
   def account_token(account)
     # Return nil (not "") so callers using `[account_token(...)].compact`

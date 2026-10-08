@@ -98,11 +98,11 @@ class ActionCableListener < BaseListener
   # então o selo "Pipeline • Estágio" da lista de conversas só mudava com F5.
   # Reaproveita conversation.updated, que o frontend já sabe aplicar.
   def pipeline_stage_updated(event)
-    broadcast_pipeline_change(event)
+    broadcast_pipeline_change(event, 'moved')
   end
 
   def pipeline_item_cancelled(event)
-    broadcast_pipeline_change(event)
+    broadcast_pipeline_change(event, 'removed')
   end
 
   def conversation_typing_on(event)
@@ -185,6 +185,12 @@ class ActionCableListener < BaseListener
     broadcast(account, [user.pubsub_token], CONVERSATION_MENTIONED, conversation.push_event_data)
   end
 
+  # Público: também é chamado pelo ActionCableLiveConversationExtras (fim do
+  # arquivo), que reaplica estes campos dentro do ActionCableBroadcastJob.
+  def conversation_live_extras(conversation)
+    { labels_data: live_labels_data(conversation), pipelines: live_pipelines_data(conversation) }
+  end
+
   private
 
   # push_event_data só leva `labels` como lista de nomes. O frontend descarta
@@ -192,10 +198,7 @@ class ActionCableListener < BaseListener
   # recarregar. `labels_data` (id/título/cor) e `pipelines` seguem o mesmo
   # formato do ConversationSerializer usado no GET /conversations.
   def conversation_live_payload(conversation)
-    conversation.push_event_data.merge(
-      labels_data: live_labels_data(conversation),
-      pipelines: live_pipelines_data(conversation)
-    )
+    conversation.push_event_data.merge(conversation_live_extras(conversation))
   end
 
   def live_labels_data(conversation)
@@ -224,12 +227,27 @@ class ActionCableListener < BaseListener
 
   # Roda no SyncDispatcher, dentro da transação que move o card: nunca pode
   # levantar exceção, senão derruba a própria movimentação.
-  def broadcast_pipeline_change(event)
-    conversation = event.data[:pipeline_item]&.conversation
-    return if conversation.nil?
+  #
+  # Dois eventos: `pipeline.item_changed` (para o Kanban recarregar em silêncio e
+  # animar o card; vale também para cards de contato, sem conversa) e
+  # `conversation.updated` (selo de pipeline na lista de conversas do chat).
+  def broadcast_pipeline_change(event, action)
+    item = event.data[:pipeline_item]
+    return if item.nil?
 
     account = single_tenant_account
     tokens = (user_tokens(account, nil) + [account_token(account)]).compact
+    broadcast(account, tokens, 'pipeline.item_changed', {
+                action: action,
+                pipeline_id: item.pipeline_id,
+                pipeline_item_id: item.id,
+                pipeline_stage_id: item.pipeline_stage_id,
+                conversation_id: item.conversation_id
+              })
+
+    conversation = item.conversation
+    return if conversation.nil?
+
     broadcast(account, tokens, CONVERSATION_UPDATED, conversation_live_payload(conversation))
   rescue StandardError => e
     Rails.logger.error "ActionCableListener pipeline broadcast failed: #{e.class}: #{e.message}"
@@ -282,3 +300,31 @@ class ActionCableListener < BaseListener
 end
 
 ActionCableListener.prepend_mod_with('ActionCableListener')
+
+# O ActionCableBroadcastJob recarrega a conversa e refaz `push_event_data` para
+# todo evento de conversa (proteção do vendor contra eventos fora de ordem), o
+# que descarta `labels_data` e `pipelines` montados acima. Este módulo reaplica
+# os dois campos depois do recarregamento, já com o dado mais recente. Fica neste
+# arquivo porque ele já é montado no crm e no crm_sidekiq (onde o job roda).
+module ActionCableLiveConversationExtras
+  private
+
+  def prepare_broadcast_data(event_name, data)
+    add_live_conversation_extras(event_name, super)
+  end
+
+  def add_live_conversation_extras(event_name, result)
+    return result unless ActionCableBroadcastJob::CONVERSATION_UPDATE_EVENTS.include?(event_name) && result.is_a?(Hash)
+
+    conversation = Conversation.find_by(id: result[:id] || result['id'])
+    return result if conversation.nil?
+
+    result.merge(ActionCableListener.instance.conversation_live_extras(conversation))
+  rescue StandardError => e
+    Rails.logger.error "ActionCableLiveConversationExtras failed: #{e.class}: #{e.message}"
+    result
+  end
+end
+
+ActionCableBroadcastJob.prepend(ActionCableLiveConversationExtras) unless ActionCableBroadcastJob.include?(ActionCableLiveConversationExtras)
+

@@ -352,7 +352,10 @@ services:
   ## --------------------------- FRONTEND --------------------------- ##
 
   evocrm_frontend:
-    image: evoapicloud/evo-ai-frontend-community:latest
+    # Fixada em 2026-10-09 (tag local, não existe no registry): os sub_filter de
+    # nginx_frontend_default.conf são trechos exatos do bundle minificado desta
+    # imagem. Voltar para :latest só junto com a re-derivação de todos eles.
+    image: evoapicloud/evo-ai-frontend-community:patched-base-2026-08-28
     <<: *network
     environment:
     - VITE_APP_ENV=production
